@@ -192,6 +192,6 @@ body{margin:0;font:15px/1.45 var(--f-body)}
 <script type="module" src="fb.js"></script>
 <script>
 setTimeout(function(){var b=document.getElementById('boot');if(b&&!b.hidden)b.innerHTML='Connexion impossible pour le moment.<br>Vérifiez votre réseau puis rechargez la page.'},9000);
-if('serviceWorker' in navigator)addEventListener('load',function(){navigator.serviceWorker.register('sw.js').catch(function(){})});
+if('serviceWorker' in navigator){var had=!!navigator.serviceWorker.controller,rl=false;navigator.serviceWorker.addEventListener('controllerchange',function(){if(had&&!rl){rl=true;location.reload()}});addEventListener('load',function(){navigator.serviceWorker.register('sw.js').then(function(r){r.update()}).catch(function(){})})}
 </script>
 </body></html>
