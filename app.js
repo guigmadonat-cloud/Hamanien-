@@ -4,7 +4,7 @@ const CATS=['Carburant','Entretien & pièces','Réparation','Assurance','Visite 
 const PRESETS=['Assurance','Visite technique','Vignette','Vidange','Révision','Contrôle des pneus','Permis / carte grise','Loyer / charges'];
 const MS=['janv.','févr.','mars','avr.','mai','juin','juil.','août','sept.','oct.','nov.','déc.'];
 const MF=['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre'];
-const TABS=[['dash','Tableau de bord'],['saisie','Saisie de la semaine'],['veh','Véhicules'],['bnb','Airbnb'],['rem','Échéances'],['jou','Journal'],['data','Données']];
+const TABS=[['dash','Tableau de bord'],['saisie','Saisie de la semaine'],['km','Kilométrage'],['veh','Véhicules'],['bnb','Airbnb'],['rem','Échéances'],['jou','Journal'],['data','Données']];
 
 const pd=s=>{const a=s.split('-').map(Number);return new Date(a[0],a[1]-1,a[2])};
 const iso=d=>d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
@@ -20,7 +20,7 @@ const uid=()=>Math.random().toString(36).slice(2,10);
 const sum=(a,f)=>a.reduce((t,x)=>t+(f?f(x):x),0);
 
 let store=null, dl=null;
-const S={vehicles:[],ops:[],rems:[],stays:[],tab:'dash',period:'y'+today.slice(0,4),cur:'FCFA',week:monday(today),
+const S={vehicles:[],ops:[],rems:[],stays:[],odo:[],oil:[],tab:'dash',period:'y'+today.slice(0,4),cur:'FCFA',week:monday(today),
   calMonth:today.slice(0,7),editOp:null,jv:'all',jt:'all',ready:false,nodb:false};
 try{const t=localStorage.getItem('hs_tab'),c=localStorage.getItem('hs_cur');if(t&&TABS.some(x=>x[0]===t))S.tab=t;if(c==='EUR'||c==='FCFA')S.cur=c}catch(e){}
 
@@ -247,6 +247,67 @@ function viewJou(){
     '<select id="j_type" aria-label="Type"><option value="all">Recettes et charges</option><option value="recette"'+(b==='recette'?' selected':'')+'>Recettes</option><option value="charge"'+(b==='charge'?' selected':'')+'>Charges</option></select></div>'+
     '<div class="panel"><h2>'+l.length+' opération'+(l.length>1?'s':'')+'</h2><div class="list">'+(l.length?l.slice(0,200).map(opItem).join(''):'<div class="empty">Rien sur cette période.</div>')+'</div>'+(l.length>200?'<p class="hint">200 premières lignes. L\'export Excel contient tout.</p>':'')+'</div>'}
 
+/* ---------- kilométrage & vidange ---------- */
+const DN=['lun.','mar.','mer.','jeu.','ven.','sam.','dim.'];
+const OIL_EVERY=10000;
+const dd=(a,b)=>Math.round((pd(b)-pd(a))/864e5);
+const nk=n=>nf.format(Math.round(n))+' km';
+function odoList(vid,over){const m={};S.odo.filter(o=>o.vid===vid).forEach(o=>m[o.date]=o.km);
+  if(over)Object.keys(over).forEach(d=>{if(over[d]==null)delete m[d];else m[d]=over[d]});
+  return Object.keys(m).sort().map(d=>({date:d,km:m[d]}))}
+function odoDeltas(L){return L.map((e,i)=>{if(!i)return {date:e.date,km:e.km,delta:null,gap:0};const p=L[i-1];return {date:e.date,km:e.km,delta:e.km-p.km,gap:dd(p.date,e.date)}})}
+function avgKm(vid,days){const L=odoList(vid);if(L.length<2)return 0;const last=L[L.length-1],from=addDays(last.date,-days);
+  let i=L.findIndex(e=>e.date>=from);if(i<0)i=L.length-1;i=Math.min(Math.max(0,i-1),L.length-2);
+  const f=L[i],d=dd(f.date,last.date);return d>0?Math.max(0,(last.km-f.km)/d):0}
+function oilOf(vid){return S.oil.filter(o=>o.vid===vid).sort((a,b)=>b.date.localeCompare(a.date))[0]||null}
+function oilStatus(v){const o=oilOf(v.id),L=odoList(v.id),last=L[L.length-1];
+  if(!o)return {state:'none',v};if(!last)return {state:'noodo',v,o};
+  const every=o.every||OIL_EVERY,next=o.km+every,rem=next-last.km,avg=avgKm(v.id,14),days=avg>0?rem/avg:null;
+  const state=rem<=0?'over':(rem<=1500||(days!=null&&days<=10))?'soon':'ok';
+  return {state,v,o,last,next,rem,avg,days,every,eta:days!=null&&rem>0?addDays(last.date,Math.round(days)):null}}
+function oilChip(st){return st.state==='over'?'<span class="chip loss">Dépassée de '+nk(-st.rem)+'</span>':st.state==='soon'?'<span class="chip warn">Dans '+nk(st.rem)+'</span>':'<span class="chip">Dans '+nk(st.rem)+'</span>'}
+function kdText(e){if(!e)return '';if(e.delta==null)return '<small>1re saisie</small>';
+  if(e.delta<0)return '<span class="neg">Erreur ?</span>';
+  return '<b>'+nf.format(e.delta)+' km</b>'+(e.gap>1?'<small> sur '+e.gap+' j</small>':'')}
+function kmCalc(vid){const over={};
+  for(let i=0;i<7;i++){const d=addDays(S.week,i),el=$('o_'+vid+'_'+d);if(!el)return;over[d]=el.value===''?null:+el.value}
+  const by={};odoDeltas(odoList(vid,over)).forEach(e=>by[e.date]=e);let tot=0,cov=0,bad=false;
+  for(let i=0;i<7;i++){const d=addDays(S.week,i),e=by[d],sp=$('kd_'+vid+'_'+d);if(sp)sp.innerHTML=kdText(e);
+    if(e&&e.delta!=null){if(e.delta<0)bad=true;else{tot+=e.delta;cov+=e.gap}}}
+  const t=$('kt_'+vid);if(t){const rec=sum(S.ops.filter(o=>o.vid===vid&&o.week===S.week&&o.type==='recette'),o=>o.amount);
+    t.innerHTML=tot>0||bad?'Total semaine : <b>'+nk(tot)+'</b>'+(cov>0?' · '+nk(tot/cov)+' par jour':'')+(tot>0&&rec>0?' · '+fmt(rec/tot)+' de recette par km':'')+(bad?' · <span class="neg">un compteur est à vérifier</span>':''):'<span class="hint">Aucun kilométrage cette semaine.</span>'}
+  return bad}
+function oilCard(v){const st=oilStatus(v),o=st.o;let line;
+  if(st.state==='none')line='Aucune vidange enregistrée. Indiquez la dernière ci-dessous.';
+  else if(st.state==='noodo')line='Dernière vidange le '+fdy(o.date)+' à '+nk(o.km)+'. Saisissez le compteur du jour pour calculer la prochaine.';
+  else line='Dernière : '+fd(o.date)+' à '+nk(o.km)+' · prochaine à <b>'+nk(st.next)+'</b><br>Compteur actuel '+nk(st.last.km)+' (le '+fd(st.last.date)+')'+(st.avg>0?' · rythme '+nk(st.avg)+' par jour':'')+(st.eta?' · estimée vers le '+fdy(st.eta):'');
+  const open=st.state==='none'||st.state==='over'?' open':'';
+  return '<div class="oil">'+tag(v)+' <b>'+esc(v.name)+'</b> '+(st.rem!=null?oilChip(st):'')+'<div class="hint">'+line+'</div>'+
+    '<details'+open+'><summary>Enregistrer une vidange</summary><div class="form">'+
+    '<label class="field"><span>Date de la vidange</span><input type="date" id="ol_d_'+v.id+'" value="'+today+'"></label>'+
+    '<label class="field"><span>Compteur ce jour-là (km)</span><input type="number" inputmode="numeric" id="ol_k_'+v.id+'" placeholder="si connu"></label>'+
+    '<label class="field"><span>ou km faits depuis</span><input type="number" inputmode="numeric" id="ol_s_'+v.id+'" placeholder="sinon"></label>'+
+    '<button class="btn pri" data-act="saveoil" data-vid="'+v.id+'">Enregistrer</button></div>'+
+    '<p class="hint">Si vous ne connaissez pas le compteur de ce jour, indiquez les km parcourus depuis la vidange (somme des rapports du traceur). Il faut avoir saisi le compteur actuel.</p></details></div>'}
+function kmBlock(v){let rows='';
+  for(let i=0;i<7;i++){const d=addDays(S.week,i),e=S.odo.find(o=>o.id===v.id+'_'+d);
+    rows+='<div class="krow"><span>'+DN[i]+' '+fd(d)+'</span><input type="number" inputmode="numeric" min="0" data-okm="1" data-vid="'+v.id+'" id="o_'+v.id+'_'+d+'" value="'+(e?e.km:'')+'" placeholder="Compteur"><span class="kd" id="kd_'+v.id+'_'+d+'"></span></div>'}
+  return '<div class="kblock"><div>'+tag(v)+' <b>'+esc(v.name)+'</b> '+plate(v)+'</div>'+rows+'<div class="kt" id="kt_'+v.id+'"></div></div>'}
+function viewKm(){const drv=S.vehicles.filter(isDrv);
+  let h='<div class="panel">'+weekNav()+'</div>';
+  h+='<div class="panel"><h2>Compteur kilométrique</h2><p class="hint" style="margin:-6px 0 6px">Chaque jour, notez le kilométrage total affiché. Les km parcourus sont déduits de l\'écart avec la saisie précédente.</p>';
+  h+=drv.map(kmBlock).join('')+'<div style="margin-top:10px"><button class="btn pri" data-act="savekm">Enregistrer les compteurs</button></div></div>';
+  h+='<div class="panel"><h2>Vidange (tous les '+nf.format(OIL_EVERY)+' km)</h2>'+drv.map(oilCard).join('')+'</div>';
+  return h}
+function alertsPanel(){const it=[];const dv=S.vehicles.filter(isDrv);
+  dv.forEach(v=>{const st=oilStatus(v);
+    if(st.state==='over'||st.state==='soon')it.push('<div class="it"><div class="d">'+(st.eta?'≈ '+fd(st.eta):'À faire')+'</div><div class="w">Vidange · '+tag(v)+' '+esc(v.name)+'<small>Prochaine à '+nk(st.next)+' · compteur '+nk(st.last.km)+'</small></div><div>'+oilChip(st)+'</div><div class="ac"><button class="btn sm" data-act="tab" data-v="km">Voir</button></div></div>');
+    if(S.odo.length){const L=odoList(v.id),last=L[L.length-1],age=last?dd(last.date,today):null;
+      if(age==null||age>=3)it.push('<div class="it"><div class="d">'+(last?fd(last.date):'—')+'</div><div class="w">Compteur à saisir · '+tag(v)+' '+esc(v.name)+'<small>'+(last?'Dernière saisie il y a '+age+' jours':'Aucune saisie')+'</small></div><div><span class="chip warn">À jour ?</span></div><div class="ac"><button class="btn sm" data-act="tab" data-v="km">Saisir</button></div></div>')}});
+  if(!S.odo.length&&dv.length&&S.ready)it.push('<div class="it"><div class="d">—</div><div class="w">Suivi kilométrique<small>Saisissez les compteurs pour activer les km par jour et l\'alerte de vidange.</small></div><div></div><div class="ac"><button class="btn sm" data-act="tab" data-v="km">Commencer</button></div></div>');
+  return it.length?'<div class="panel"><h2>Alertes</h2><div class="list">'+it.join('')+'</div></div>':''}
+function viewDashA(){return alertsPanel()+viewDash()}
+
 function viewData(){
   return '<div class="panel"><h2>Vos données</h2><p class="hint" style="margin-top:-6px">Compte : '+esc((S.user&&S.user.email)||'')+'. Les données sont enregistrées en ligne et aussi sur ce téléphone, elles restent disponibles sans réseau et se synchronisent au retour de la connexion.</p>'+
    '<div class="ac" style="flex-wrap:wrap;gap:10px"><button class="btn pri" data-act="export">Exporter en Excel</button><button class="btn" data-act="backup">Télécharger une sauvegarde</button>'+
@@ -260,7 +321,7 @@ function render(){
   $('tabs').innerHTML=TABS.map(t=>'<button role="tab" data-act="tab" data-v="'+t[0]+'" aria-selected="'+(S.tab===t[0])+'">'+t[1]+'</button>').join('');
   if(S.nodb){$('app').innerHTML='<div class="panel empty">Connectez-vous à Claude pour ouvrir vos données.</div>';return}
   if(!S.ready){return}
-  const v={dash:viewDash,saisie:viewSaisie,veh:viewVeh,bnb:viewBnb,rem:viewRem,jou:viewJou,data:viewData}[S.tab]();
+  const v={dash:viewDashA,saisie:viewSaisie,km:viewKm,veh:viewVeh,bnb:viewBnb,rem:viewRem,jou:viewJou,data:viewData}[S.tab]();
   const sig=S.tab+'|'+S.week+'|'+S.editOp+'|'+S.calMonth+'|'+S.period+'|'+S.jv+'|'+S.jt;
   const keep=[];
   if(render.sig===sig)$('app').querySelectorAll('input[id],select[id]').forEach(e=>{
@@ -270,6 +331,7 @@ function render(){
   keep.forEach(k=>{const e=$(k[0]);if(!e)return;if(k[2])e.checked=k[1];else{const same=e.value===k[1];if(!same&&(k[1]!==''||e.tagName==='SELECT')){e.value=k[1]}if(k[3])e.dataset.t=k[3]}});
   render.sig=sig;if(fid&&$(fid)&&$(fid).tagName==='INPUT'&&document.activeElement!==$(fid))try{$(fid).focus()}catch(e){}
   if(S.tab==='saisie')S.vehicles.filter(isDrv).forEach(x=>rowCalc(x.id));
+  if(S.tab==='km')S.vehicles.filter(isDrv).forEach(x=>kmCalc(x.id));
 }
 function rowCalc(vid){const v=S.vehicles.find(x=>x.id===vid),d=$('d_'+vid),r=$('r_'+vid),e=$('e_'+vid);if(!v||!d||!e)return;
   const exp=(+d.value||0)*v.rate,got=r.value===''?null:+r.value;
@@ -318,6 +380,20 @@ const ACT={
    d.name=$('vn_'+id).value.trim()||v.name;d.code=$('vk_'+id).value.trim().toUpperCase();if($('vp_'+id))d.plate=$('vp_'+id).value.trim().toUpperCase();
    const col=document.querySelector('input[name="vcol_'+id+'"]:checked');if(col)d.color=col.value;if($('vd_'+id))d.driver=$('vd_'+id).value.trim();d.rate=+$('vr_'+id).value||0;d.cost=+$('vc_'+id).value||0;
    if(await put('vehicles',id,d))toast('Véhicule mis à jour')},
+ async savekm(){let n=0,bad=false;
+   for(const v of S.vehicles.filter(isDrv)){
+     for(let i=0;i<7;i++){const d=addDays(S.week,i),el=$('o_'+v.id+'_'+d);if(!el)continue;const id=v.id+'_'+d,ex=S.odo.find(o=>o.id===id);
+       if(el.value!==''){const km=Math.round(+el.value);if(!ex||ex.km!==km){if(await put('odo',id,{vid:v.id,date:d,km}))n++}}
+       else if(ex){if(await del('odo',id))n++}}
+     if(kmCalc(v.id))bad=true}
+   toast(bad?'Enregistré. Un compteur est plus bas que la veille, vérifiez.':n?'Compteurs enregistrés':'Rien de nouveau à enregistrer')},
+ async saveoil(b){const vid=b.dataset.vid,d=$('ol_d_'+vid).value,k=$('ol_k_'+vid).value,sn=$('ol_s_'+vid).value;
+   if(!d)return toast('Indiquez la date de la vidange');
+   let km;if(k!=='')km=Math.round(+k);
+   else if(sn!==''){const L=odoList(vid),last=L[L.length-1];if(!last)return toast('Saisissez d\'abord le compteur actuel ci-dessus');km=Math.round(last.km-(+sn))}
+   else return toast('Indiquez le compteur ou les km faits depuis');
+   if(km<0)return toast('Valeur incohérente');
+   if(await put('oil',vid+'_'+d,{vid,date:d,km,every:OIL_EVERY}))toast('Vidange enregistrée')},
  async export(){exportXlsx()},
  async backup(){backupJson()},
  async initdefaults(){await store.setMany([['vehicles/v1',{name:'Dzire 1',driver:'',kind:'taxi',rate:23000,cost:0,order:1,code:'D1',color:'c1',plate:''}],['vehicles/v2',{name:'Dzire 2',driver:'',kind:'taxi',rate:23000,cost:0,order:2,code:'D2',color:'c3',plate:''}],['vehicles/v3',{name:'Camionnette Mercedes',driver:'',kind:'camion',rate:35000,cost:0,order:3,code:'MB',color:'c2',plate:''}],['vehicles/v4',{name:'Appartement Oradou',driver:'',kind:'logement',rate:30000,cost:0,order:4,code:'APT',color:'c4',plate:''}]]);toast('Activités créées')},
@@ -331,6 +407,7 @@ document.addEventListener('change',e=>{const t=e.target;
   else if(t.id==='w_date'&&t.value){S.week=monday(t.value);render()}
   else if(t.id==='j_vid'){S.jv=t.value;render()} else if(t.id==='j_type'){S.jt=t.value;render()}});
 document.addEventListener('input',e=>{const t=e.target,id=t.id||'';
+  if(t.dataset&&t.dataset.okm){kmCalc(t.dataset.vid);return}
   if(/^[dr]_/.test(id)&&$('e_'+id.slice(2)))rowCalc(id.slice(2));
   else if(id==='c_amt'||id==='c_unit'){const a=+$('c_amt').value,u=$('c_unit').value;$('c_eq').textContent=a>0?'≈ '+(u==='EUR'?fmt(a*RATE,'FCFA'):fmt(a,'EUR')):''}
   else if(id==='a_amt'||id==='a_unit'){const a=+$('a_amt').value,u=$('a_unit').value;$('a_eq').textContent=a>0?'≈ '+(u==='EUR'?fmt(a*RATE,'FCFA'):fmt(a,'EUR')):''}
@@ -353,6 +430,8 @@ async function exportXlsx(){
   add('Opérations',S.ops.slice().sort((a,b)=>a.week.localeCompare(b.week)).map(o=>({'Semaine du':o.week,'Code':vcode(vget(o.vid)),'Véhicule / activité':vname(o.vid),'Chauffeur':(vget(o.vid)||{}).driver||'','Type':o.type==='recette'?'Recette':'Charge','Catégorie':o.cat||'','Montant (F CFA)':o.amount,'Montant (€)':e(o.amount),'Jours':o.days==null?'':o.days,'Attendu (F CFA)':o.expected==null?'':o.expected,'Note':o.note||''})),[12,8,24,14,10,24,16,12,8,16,30]);
   add('Réservations',S.stays.slice().sort((a,b)=>a.start.localeCompare(b.start)).map(s=>({'Arrivée':s.start,'Départ':s.end,'Nuits':s.nights,'Prix/nuit (F CFA)':s.rate,'Total (F CFA)':s.total,'Total (€)':e(s.total),'Canal':s.channel,'Voyageur':s.guest||''})),[12,12,8,16,14,12,10,20]);
   add('Échéances',S.rems.slice().sort((a,b)=>a.due.localeCompare(b.due)).map(r=>({'Date limite':r.due,'Véhicule':vname(r.vid),'Quoi':r.label,'Budget (F CFA)':r.est||0,'Budget (€)':e(r.est||0),'Fait':r.done?'Oui':'Non'})),[12,22,26,14,12,8]);
+  add('Kilométrage',S.vehicles.filter(isDrv).flatMap(v=>odoDeltas(odoList(v.id)).map(x=>({'Date':x.date,'Code':vcode(v),'Véhicule':v.name,'Compteur (km)':x.km,'Km parcourus':x.delta==null?'':x.delta,'Jours couverts':x.gap||''}))).sort((a,b)=>a.Date.localeCompare(b.Date)),[12,8,22,14,14,14]);
+  add('Vidanges',S.oil.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(o=>({'Date':o.date,'Véhicule':vname(o.vid),'Compteur (km)':o.km,'Prochaine (km)':o.km+(o.every||OIL_EVERY)})),[12,22,14,14]);
   try{
     const buf=XLSX.write(wb,{type:'array',bookType:'xlsx'});
     await saveFile('Hamanien-Services_'+today+'.xlsx',new Blob([buf],{type:'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'}));
@@ -364,12 +443,12 @@ async function saveFile(name,blob){
   const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=name;document.body.appendChild(a);a.click();setTimeout(()=>{URL.revokeObjectURL(a.href);a.remove()},4000);toast('Fichier prêt')}
 function backupJson(){
   const o={app:'hamanien',version:1,exportedAt:new Date().toISOString()};
-  [['vehicles',S.vehicles],['ops',S.ops],['rems',S.rems],['stays',S.stays]].forEach(p=>{o[p[0]]={};p[1].forEach(x=>{const d=Object.assign({},x);delete d.id;o[p[0]][x.id]=d})});
+  [['vehicles',S.vehicles],['ops',S.ops],['rems',S.rems],['stays',S.stays],['odo',S.odo],['oil',S.oil]].forEach(p=>{o[p[0]]={};p[1].forEach(x=>{const d=Object.assign({},x);delete d.id;o[p[0]][x.id]=d})});
   saveFile('Hamanien-sauvegarde_'+today+'.json',new Blob([JSON.stringify(o)],{type:'application/json'}))}
 async function importJson(file){
   if(!file)return;
   try{const o=JSON.parse(await file.text());const list=[];
-    ['vehicles','ops','rems','stays'].forEach(c=>{const m=o[c]||{};Object.keys(m).forEach(id=>list.push([c+'/'+id,m[id]]))});
+    ['vehicles','ops','rems','stays','odo','oil'].forEach(c=>{const m=o[c]||{};Object.keys(m).forEach(id=>list.push([c+'/'+id,m[id]]))});
     if(!list.length)return toast('Ce fichier ne contient aucune donnée');
     await store.setMany(list);toast(list.length+' lignes importées')}
   catch(e){toast('Fichier illisible')}}
@@ -378,14 +457,14 @@ async function importJson(file){
 function sub(name,key,sort){return store.collection(name).onSnapshot(snap=>{
   S[key]=snap.docs.map(d=>Object.assign({id:d.id},d.data()));if(sort)S[key].sort(sort);
   S.loaded=(S.loaded||0)+1;S.ready=true;
-  const a=document.activeElement;if(a&&$('app').contains(a)&&/^(INPUT|SELECT)$/.test(a.tagName)&&S.tab==='saisie')return;
+  const a=document.activeElement;if(a&&$('app').contains(a)&&/^(INPUT|SELECT)$/.test(a.tagName)&&(S.tab==='saisie'||S.tab==='km'))return;
   render()},()=>{S.ready=true;render()})}
 let unsubs=[];
 function start(st,opts){
-  store=st;S.user=opts||{};S.vehicles=[];S.ops=[];S.rems=[];S.stays=[];S.ready=false;
+  store=st;S.user=opts||{};S.vehicles=[];S.ops=[];S.rems=[];S.stays=[];S.odo=[];S.oil=[];S.ready=false;
   unsubs.forEach(u=>{try{u&&u()}catch(e){}});
   $('app').innerHTML='<div class="empty">Chargement de vos données…</div>';render();
-  unsubs=[sub('vehicles','vehicles',(a,b)=>(a.order||9)-(b.order||9)),sub('ops','ops'),sub('rems','rems'),sub('stays','stays')]}
+  unsubs=[sub('vehicles','vehicles',(a,b)=>(a.order||9)-(b.order||9)),sub('ops','ops'),sub('rems','rems'),sub('stays','stays'),sub('odo','odo'),sub('oil','oil')]}
 render();
 window.HSApp={start:start};
 })();
