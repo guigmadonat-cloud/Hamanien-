@@ -20,8 +20,9 @@ const uid=()=>Math.random().toString(36).slice(2,10);
 const sum=(a,f)=>a.reduce((t,x)=>t+(f?f(x):x),0);
 
 let store=null, dl=null;
-const S={vehicles:[],ops:[],rems:[],stays:[],odo:[],oil:[],tab:'dash',period:'y'+today.slice(0,4),cur:'FCFA',week:monday(today),
+const S={vehicles:[],ops:[],rems:[],stays:[],odo:[],oil:[],vmode:'week',tab:'dash',period:'y'+today.slice(0,4),cur:'FCFA',week:monday(today),
   calMonth:today.slice(0,7),editOp:null,jv:'all',jt:'all',ready:false,nodb:false};
+try{if(localStorage.getItem('hs_vm')==='day')S.vmode='day'}catch(e){}
 try{const t=localStorage.getItem('hs_tab'),c=localStorage.getItem('hs_cur');if(t&&TABS.some(x=>x[0]===t))S.tab=t;if(c==='EUR'||c==='FCFA')S.cur=c}catch(e){}
 
 function fmt(n,c){c=c||S.cur;return c==='EUR'?nf.format(Math.round(n/RATE))+' €':nf.format(Math.round(n))+' F'}
@@ -128,11 +129,12 @@ function monthChart(){
 function weekNav(){return '<div class="wk"><button class="btn sm" data-act="wprev" aria-label="Semaine précédente">‹</button><b>Semaine du '+fdy(S.week)+'</b><button class="btn sm" data-act="wnext" aria-label="Semaine suivante">›</button><input type="date" id="w_date" value="'+S.week+'" aria-label="Choisir une date"></div>'}
 
 function viewSaisie(){
-  const drv=S.vehicles.filter(isDrv);
+  const drv=S.vehicles.filter(isDrv),dflt=monday(today)===S.week?today:S.week;
   let h='<div class="panel">'+weekNav()+'</div>';
-  h+='<div class="panel"><h2>Versements des chauffeurs</h2><p class="hint" style="margin:-6px 0 6px">Jours travaillés et montant reçu. L\'écart avec le versement attendu est calculé pour vous.</p>';
+  h+='<div class="panel"><h2>Versements des chauffeurs</h2><div class="seg" role="group" aria-label="Mode de saisie" style="margin:0 0 8px"><button data-act="vmode" data-v="week" aria-pressed="'+(S.vmode==='week')+'">Par semaine</button><button data-act="vmode" data-v="day" aria-pressed="'+(S.vmode==='day')+'">Par jour</button></div><p class="hint" style="margin:0 0 6px">'+(S.vmode==='day'?'Montant reçu chaque jour. Laissez vide un jour non travaillé, mettez 0 si le chauffeur n\'a rien versé.':'Jours travaillés et montant reçu pour la semaine. L\'écart avec le versement attendu est calculé pour vous.')+'</p>';
   drv.forEach(v=>{const op=S.ops.find(o=>o.id==='rv_'+v.id+'_'+S.week);
-    h+='<div class="drow" data-vid="'+v.id+'"><div>'+tag(v)+' <b>'+esc(v.name)+'</b><div class="hint">'+(v.driver?esc(v.driver)+' · ':'')+fmt(v.rate)+' / jour '+plate(v)+'</div></div>'+
+    if(S.vmode==='day'){h+=dayRow(v,op);return}
+    h+='<div class="drow" data-vid="'+v.id+'"><div>'+tag(v)+' <b>'+esc(v.name)+'</b><div class="hint">'+(v.driver?esc(v.driver)+' · ':'')+fmt(v.rate)+' / jour '+plate(v)+'</div>'+(op&&op.daily?'<div class="hint">Détail par jour existant : l\'enregistrer ici le remplacera.</div>':'')+'</div>'+
       '<label class="field"><span>Jours</span><input type="number" min="0" max="7" id="d_'+v.id+'" value="'+(op&&op.days!=null?op.days:6)+'"></label>'+
       '<label class="field"><span>Reçu (F CFA)</span><input type="number" min="0" step="500" id="r_'+v.id+'" value="'+(op?op.amount:'')+'" placeholder="'+(6*v.rate)+'"></label>'+
       '<div id="e_'+v.id+'" class="hint"></div><button class="btn sm" data-act="fillexp" data-vid="'+v.id+'">Tout reçu</button></div>'});
@@ -141,6 +143,7 @@ function viewSaisie(){
     '<label class="field"><span>Véhicule / activité</span><select id="c_vid">'+vopts()+'</select></label>'+
     '<label class="field"><span>Catégorie</span><select id="c_cat">'+catOpts('Carburant')+'</select></label>'+
     '<label class="field"><span>Montant</span><div class="amt"><input type="number" min="0" id="c_amt" placeholder="0"><select id="c_unit"><option>FCFA</option><option>EUR</option></select></div><span class="hint" id="c_eq"></span></label>'+
+    '<label class="field"><span>Date</span><input type="date" id="c_date" value="'+dflt+'"></label>'+
     '<label class="field"><span>Note</span><input type="text" id="c_note" placeholder="ex. plein, vidange…"></label>'+
     '<button class="btn pri" data-act="addcharge">Ajouter</button></div></div>';
   const bn=S.vehicles.filter(v=>!isDrv(v));
@@ -148,6 +151,7 @@ function viewSaisie(){
     '<label class="field"><span>Activité</span><select id="a_vid">'+vopts(bn[0]&&bn[0].id,v=>!isDrv(v))+'</select></label>'+
     '<label class="field"><span>Canal</span><select id="a_chan"><option>Airbnb</option><option>Réservation directe</option><option>Autre</option></select></label>'+
     '<label class="field"><span>Montant</span><div class="amt"><input type="number" min="0" id="a_amt" placeholder="0"><select id="a_unit"><option>FCFA</option><option>EUR</option></select></div><span class="hint" id="a_eq"></span></label>'+
+    '<label class="field"><span>Date</span><input type="date" id="a_date" value="'+dflt+'"></label>'+
     '<label class="field"><span>Note</span><input type="text" id="a_note" placeholder="ex. séjour de Marie"></label>'+
     '<button class="btn pri" data-act="addrec">Ajouter</button></div><p class="hint">Pour suivre les nuits et le taux d\'occupation, utilisez plutôt l\'onglet Airbnb avec les dates du séjour.</p></div>';
   const wk=S.ops.filter(o=>o.week===S.week&&!o.id.startsWith('rv_'));
@@ -160,7 +164,7 @@ function opItem(o){
     '<label class="field"><span>Catégorie</span><select id="x_cat">'+catOpts(o.cat)+'</select></label>'+
     '<label class="field"><span>Note</span><input type="text" id="x_note" value="'+esc(o.note||'')+'"></label>'+
     '<span class="ac"><button class="btn sm pri" data-act="saveop" data-id="'+o.id+'">Enregistrer</button><button class="btn sm" data-act="cancel">Annuler</button></span></div></div></div>';
-  return '<div class="it"><div class="d">'+fd(o.week)+'</div><div class="w">'+tag(vget(o.vid))+' '+esc(o.cat||'')+(o.note?'<small>'+esc(o.note)+'</small>':'')+(o.expected!=null&&o.amount<o.expected?'<small class="neg">Écart : −'+fmt(o.expected-o.amount)+'</small>':'')+'</div>'+
+  return '<div class="it"><div class="d">'+fd(o.date||o.week)+'</div><div class="w">'+tag(vget(o.vid))+' '+esc(o.cat||'')+(o.note?'<small>'+esc(o.note)+'</small>':'')+(o.daily?'<small>Par jour : '+Object.keys(o.daily).sort().map(d=>DN[(pd(d).getDay()+6)%7]+' '+nf.format(o.daily[d])).join(' · ')+'</small>':'')+(o.expected!=null&&o.amount<o.expected?'<small class="neg">Écart : −'+fmt(o.expected-o.amount)+'</small>':'')+'</div>'+
     '<div class="'+(o.type==='recette'?'pos':'neg')+'"><b>'+(o.type==='recette'?'+':'−')+fmt(o.amount)+'</b></div>'+
     '<div class="ac"><button class="btn sm" data-act="editop" data-id="'+o.id+'">Modifier</button><button class="btn sm danger" data-act="del" data-kind="ops" data-id="'+o.id+'">Supprimer</button></div></div>'}
 
@@ -306,6 +310,14 @@ function alertsPanel(){const it=[];const dv=S.vehicles.filter(isDrv);
       if(age==null||age>=3)it.push('<div class="it"><div class="d">'+(last?fd(last.date):'—')+'</div><div class="w">Compteur à saisir · '+tag(v)+' '+esc(v.name)+'<small>'+(last?'Dernière saisie il y a '+age+' jours':'Aucune saisie')+'</small></div><div><span class="chip warn">À jour ?</span></div><div class="ac"><button class="btn sm" data-act="tab" data-v="km">Saisir</button></div></div>')}});
   if(!S.odo.length&&dv.length&&S.ready)it.push('<div class="it"><div class="d">—</div><div class="w">Suivi kilométrique<small>Saisissez les compteurs pour activer les km par jour et l\'alerte de vidange.</small></div><div></div><div class="ac"><button class="btn sm" data-act="tab" data-v="km">Commencer</button></div></div>');
   return it.length?'<div class="panel"><h2>Alertes</h2><div class="list">'+it.join('')+'</div></div>':''}
+function dayRow(v,op){const dl=op&&op.daily||{};let rows='';
+  for(let i=0;i<7;i++){const d=addDays(S.week,i);
+    rows+='<div class="krow"><span>'+DN[i]+' '+fd(d)+'</span><input type="number" inputmode="numeric" min="0" step="500" data-dy="1" data-vid="'+v.id+'" id="dy_'+v.id+'_'+d+'" value="'+(dl[d]!=null?dl[d]:'')+'" placeholder="'+v.rate+'"><span></span></div>'}
+  const note=op&&!op.daily?'<div class="hint">Un versement hebdomadaire de '+fmt(op.amount)+' existe pour cette semaine : enregistrer par jour le remplacera.</div>':'';
+  return '<div class="kblock"><div>'+tag(v)+' <b>'+esc(v.name)+'</b> '+plate(v)+'<div class="hint">'+(v.driver?esc(v.driver)+' · ':'')+fmt(v.rate)+' / jour</div></div>'+note+rows+'<div class="kt" id="dt_'+v.id+'"></div><div style="margin-top:6px"><button class="btn sm" data-act="fill6" data-vid="'+v.id+'">Lun–sam complets</button></div></div>'}
+function dayCalc(vid){const v=vget(vid);if(!v)return;let tot=0,n=0;
+  for(let i=0;i<7;i++){const el=$('dy_'+vid+'_'+addDays(S.week,i));if(!el)return;if(el.value!==''){n++;tot+=+el.value||0}}
+  const t=$('dt_'+vid);if(t){const exp=n*v.rate;t.innerHTML=n?'Total <b>'+fmt(tot)+'</b> ('+fmt(tot,other())+') · '+n+' jour'+(n>1?'s':'')+' · attendu '+fmt(exp)+(tot>=exp?' · <span class="pos">complet</span>':' · <span class="neg">manque '+fmt(exp-tot)+'</span>'):'<span class="hint">Aucun versement saisi.</span>'}}
 function viewDashA(){return alertsPanel()+viewDash()}
 
 function viewData(){
@@ -330,7 +342,7 @@ function render(){
   $('app').innerHTML=v;
   keep.forEach(k=>{const e=$(k[0]);if(!e)return;if(k[2])e.checked=k[1];else{const same=e.value===k[1];if(!same&&(k[1]!==''||e.tagName==='SELECT')){e.value=k[1]}if(k[3])e.dataset.t=k[3]}});
   render.sig=sig;if(fid&&$(fid)&&$(fid).tagName==='INPUT'&&document.activeElement!==$(fid))try{$(fid).focus()}catch(e){}
-  if(S.tab==='saisie')S.vehicles.filter(isDrv).forEach(x=>rowCalc(x.id));
+  if(S.tab==='saisie')S.vehicles.filter(isDrv).forEach(x=>{rowCalc(x.id);dayCalc(x.id)});
   if(S.tab==='km')S.vehicles.filter(isDrv).forEach(x=>kmCalc(x.id));
 }
 function rowCalc(vid){const v=S.vehicles.find(x=>x.id===vid),d=$('d_'+vid),r=$('r_'+vid),e=$('e_'+vid);if(!v||!d||!e)return;
@@ -350,15 +362,22 @@ const ACT={
  cnext(){const[y,m]=S.calMonth.split('-').map(Number);const d=new Date(y,m,1);S.calMonth=iso(d).slice(0,7);render()},
  fillexp(b){const v=S.vehicles.find(x=>x.id===b.dataset.vid);$('r_'+v.id).value=(+$('d_'+v.id).value||0)*v.rate;rowCalc(v.id)},
  async savevers(){let n=0;const jobs=[];
-   for(const v of S.vehicles.filter(isDrv)){const r=$('r_'+v.id).value;if(r==='')continue;const days=+$('d_'+v.id).value||0;
-     jobs.push([v.id,{vid:v.id,type:'recette',week:S.week,amount:Math.round(+r),cat:'Versement chauffeur',note:'',days,expected:days*v.rate,created:Date.now()}])}
+   for(const v of S.vehicles.filter(isDrv)){
+     if(S.vmode==='day'){const daily={};let tot=0,k=0;
+       for(let i=0;i<7;i++){const d=addDays(S.week,i),el=$('dy_'+v.id+'_'+d);if(el&&el.value!==''){daily[d]=Math.round(+el.value||0);tot+=daily[d];k++}}
+       if(!k)continue;
+       jobs.push([v.id,{vid:v.id,type:'recette',week:S.week,amount:tot,cat:'Versement chauffeur',note:'',days:k,expected:k*v.rate,daily,created:Date.now()}])}
+     else{const r=$('r_'+v.id)?$('r_'+v.id).value:'';if(r==='')continue;const days=+$('d_'+v.id).value||0;
+       jobs.push([v.id,{vid:v.id,type:'recette',week:S.week,amount:Math.round(+r),cat:'Versement chauffeur',note:'',days,expected:days*v.rate,created:Date.now()}])}}
    for(const j of jobs){if(await put('ops','rv_'+j[0]+'_'+S.week,j[1]))n++}
    toast(n?n+' versement'+(n>1?'s':'')+' enregistré'+(n>1?'s':''):'Saisissez au moins un montant reçu')},
+ vmode(b){S.vmode=b.dataset.v;try{localStorage.setItem('hs_vm',S.vmode)}catch(e){}render()},
+ fill6(b){const v=vget(b.dataset.vid);for(let i=0;i<7;i++){const el=$('dy_'+v.id+'_'+addDays(S.week,i));if(el)el.value=i<6?v.rate:''}dayCalc(v.id)},
  async addrec(){const amt=+$('a_amt').value;if(!(amt>0))return toast('Saisissez un montant');
-   const ok=await put('ops',uid(),{vid:$('a_vid').value,type:'recette',week:S.week,amount:toF(amt,$('a_unit').value),cat:$('a_chan').value,note:$('a_note').value.trim(),created:Date.now()});
+   const ok=await put('ops',uid(),{vid:$('a_vid').value,type:'recette',week:$('a_date').value?monday($('a_date').value):S.week,date:$('a_date').value||null,amount:toF(amt,$('a_unit').value),cat:$('a_chan').value,note:$('a_note').value.trim(),created:Date.now()});
    if(ok){toast('Recette ajoutée');$('a_amt').value='';$('a_note').value='';$('a_eq').textContent=''}},
  async addcharge(){const amt=+$('c_amt').value;if(!(amt>0))return toast('Saisissez un montant');
-   const ok=await put('ops',uid(),{vid:$('c_vid').value,type:'charge',week:S.week,amount:toF(amt,$('c_unit').value),cat:$('c_cat').value,note:$('c_note').value.trim(),created:Date.now()});
+   const ok=await put('ops',uid(),{vid:$('c_vid').value,type:'charge',week:$('c_date').value?monday($('c_date').value):S.week,date:$('c_date').value||null,amount:toF(amt,$('c_unit').value),cat:$('c_cat').value,note:$('c_note').value.trim(),created:Date.now()});
    if(ok){toast('Charge ajoutée');$('c_amt').value='';$('c_note').value='';$('c_eq').textContent=''}},
  editop(b){S.editOp=b.dataset.id;render()}, cancel(){S.editOp=null;render()},
  async saveop(b){const o=S.ops.find(x=>x.id===b.dataset.id);if(!o)return;const d=Object.assign({},o);delete d.id;
@@ -408,6 +427,7 @@ document.addEventListener('change',e=>{const t=e.target;
   else if(t.id==='j_vid'){S.jv=t.value;render()} else if(t.id==='j_type'){S.jt=t.value;render()}});
 document.addEventListener('input',e=>{const t=e.target,id=t.id||'';
   if(t.dataset&&t.dataset.okm){kmCalc(t.dataset.vid);return}
+  if(t.dataset&&t.dataset.dy){dayCalc(t.dataset.vid);return}
   if(/^[dr]_/.test(id)&&$('e_'+id.slice(2)))rowCalc(id.slice(2));
   else if(id==='c_amt'||id==='c_unit'){const a=+$('c_amt').value,u=$('c_unit').value;$('c_eq').textContent=a>0?'≈ '+(u==='EUR'?fmt(a*RATE,'FCFA'):fmt(a,'EUR')):''}
   else if(id==='a_amt'||id==='a_unit'){const a=+$('a_amt').value,u=$('a_unit').value;$('a_eq').textContent=a>0?'≈ '+(u==='EUR'?fmt(a*RATE,'FCFA'):fmt(a,'EUR')):''}
@@ -427,9 +447,10 @@ async function exportXlsx(){
   const mk=new Set(S.ops.map(o=>o.week.slice(0,7)));const mrows=[];
   [...mk].sort().forEach(m=>S.vehicles.forEach(v=>{const s=vstat(v.id,o=>o.week.slice(0,7)===m);if(s.rec||s.chg)mrows.push({'Mois':m,'Véhicule / activité':v.name,'Recettes (F CFA)':s.rec,'Charges (F CFA)':s.chg,'Résultat (F CFA)':s.res,'Recettes (€)':e(s.rec),'Charges (€)':e(s.chg),'Résultat (€)':e(s.res)})}));
   add('Mensuel',mrows,[10,24,16,16,16,12,12,12]);
-  add('Opérations',S.ops.slice().sort((a,b)=>a.week.localeCompare(b.week)).map(o=>({'Semaine du':o.week,'Code':vcode(vget(o.vid)),'Véhicule / activité':vname(o.vid),'Chauffeur':(vget(o.vid)||{}).driver||'','Type':o.type==='recette'?'Recette':'Charge','Catégorie':o.cat||'','Montant (F CFA)':o.amount,'Montant (€)':e(o.amount),'Jours':o.days==null?'':o.days,'Attendu (F CFA)':o.expected==null?'':o.expected,'Note':o.note||''})),[12,8,24,14,10,24,16,12,8,16,30]);
+  add('Opérations',S.ops.slice().sort((a,b)=>a.week.localeCompare(b.week)).map(o=>({'Semaine du':o.week,'Date':o.date||'','Code':vcode(vget(o.vid)),'Véhicule / activité':vname(o.vid),'Chauffeur':(vget(o.vid)||{}).driver||'','Type':o.type==='recette'?'Recette':'Charge','Catégorie':o.cat||'','Montant (F CFA)':o.amount,'Montant (€)':e(o.amount),'Jours':o.days==null?'':o.days,'Attendu (F CFA)':o.expected==null?'':o.expected,'Note':o.note||''})),[12,8,24,14,10,24,16,12,8,16,30]);
   add('Réservations',S.stays.slice().sort((a,b)=>a.start.localeCompare(b.start)).map(s=>({'Arrivée':s.start,'Départ':s.end,'Nuits':s.nights,'Prix/nuit (F CFA)':s.rate,'Total (F CFA)':s.total,'Total (€)':e(s.total),'Canal':s.channel,'Voyageur':s.guest||''})),[12,12,8,16,14,12,10,20]);
   add('Échéances',S.rems.slice().sort((a,b)=>a.due.localeCompare(b.due)).map(r=>({'Date limite':r.due,'Véhicule':vname(r.vid),'Quoi':r.label,'Budget (F CFA)':r.est||0,'Budget (€)':e(r.est||0),'Fait':r.done?'Oui':'Non'})),[12,22,26,14,12,8]);
+  add('Versements par jour',S.ops.filter(o=>o.daily).flatMap(o=>Object.keys(o.daily).sort().map(d=>({'Date':d,'Code':vcode(vget(o.vid)),'Véhicule':vname(o.vid),'Montant (F CFA)':o.daily[d],'Montant (€)':e(o.daily[d])}))).sort((a,b)=>a.Date.localeCompare(b.Date)),[12,8,22,16,12]);
   add('Kilométrage',S.vehicles.filter(isDrv).flatMap(v=>odoDeltas(odoList(v.id)).map(x=>({'Date':x.date,'Code':vcode(v),'Véhicule':v.name,'Compteur (km)':x.km,'Km parcourus':x.delta==null?'':x.delta,'Jours couverts':x.gap||''}))).sort((a,b)=>a.Date.localeCompare(b.Date)),[12,8,22,14,14,14]);
   add('Vidanges',S.oil.slice().sort((a,b)=>a.date.localeCompare(b.date)).map(o=>({'Date':o.date,'Véhicule':vname(o.vid),'Compteur (km)':o.km,'Prochaine (km)':o.km+(o.every||OIL_EVERY)})),[12,22,14,14]);
   try{
